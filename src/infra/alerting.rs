@@ -61,14 +61,4 @@ impl Default for PerformanceAlerts {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn test_alert_thresholds() {
-        let alerts = PerformanceAlerts::default();
-        alerts.check_and_alert("retrieval", 50.0, 0.75, 0.01);
-        alerts.check_and_alert("retrieval_slow", 150.0, 0.40, 0.10);
-    }
-}

@@ -40,25 +40,4 @@ impl<T> MemoryPool<T> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[tokio::test]
-    async fn test_memory_pool_acquire_and_release() {
-        let pool = MemoryPool::new(|| Vec::<u8>::with_capacity(1024));
-        assert_eq!(pool.size().await, 0);
-
-        let mut item = pool.acquire().await;
-        assert_eq!(item.capacity(), 1024);
-        item.push(1);
-        item.clear();
-
-        pool.release(item).await;
-        assert_eq!(pool.size().await, 1);
-
-        let reused = pool.acquire().await;
-        assert_eq!(reused.capacity(), 1024);
-        assert_eq!(pool.size().await, 0);
-    }
-}

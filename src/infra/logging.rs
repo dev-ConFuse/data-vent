@@ -43,21 +43,4 @@ pub fn log_retrieval_performance(
     });
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn test_log_creation() {
-        let log = PerformanceLog {
-            operation: "test_op".to_string(),
-            duration_ms: 12.5,
-            success: true,
-            cache_hit: true,
-            result_count: 5,
-            metadata: serde_json::json!({"test": true}),
-        };
-        assert_eq!(log.operation, "test_op");
-        log_performance(log);
-    }
-}

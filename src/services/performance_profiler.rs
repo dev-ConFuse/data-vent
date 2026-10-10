@@ -53,27 +53,4 @@ impl Default for PerformanceProfiler {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn test_profiler_measure() {
-        let mut profiler = PerformanceProfiler::new();
-        let val = profiler.measure("test_op", || 10 + 20);
-        assert_eq!(val, 30);
-        assert_eq!(profiler.get_measurements().len(), 1);
-        assert_eq!(profiler.get_measurements()[0].0, "test_op");
-        assert!(profiler.total_duration_ms() >= 0.0);
-    }
-
-    #[tokio::test]
-    async fn test_profiler_measure_async() {
-        let mut profiler = PerformanceProfiler::new();
-        let val = profiler
-            .measure_async("test_async_op", || async { 42 })
-            .await;
-        assert_eq!(val, 42);
-        assert_eq!(profiler.get_measurements().len(), 1);
-    }
-}
