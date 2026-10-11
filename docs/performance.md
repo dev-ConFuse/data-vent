@@ -46,7 +46,7 @@ Content-Type: application/json
 ## Multi-Level Caching (4 Tiers)
 
 `data-vent` implements a thread-safe 4-tier LRU cache:
-- **L1 Query Embeddings**: Maps raw text -> 768/1024d embedding vector (TTL: 3600s). Avoids redundant NVIDIA NIM inference calls.
+- **L1 Query Embeddings**: Maps raw text -> 2048d embedding vector (TTL: 3600s). Avoids redundant NVIDIA NIM inference calls.
 - **L2 Vector Search Results**: Maps `(graph_name, vector_hash, limit)` -> top-K chunk candidates (TTL: 300s).
 - **L3 Graph Algorithm Computations**: Caches PageRank, Betweenness Centrality, and WCC component assignments (TTL: 1800s).
 - **L4 Aggregated Responses**: Stores finalized WRRF candidate ranking for identical query contexts (TTL: 120s).
