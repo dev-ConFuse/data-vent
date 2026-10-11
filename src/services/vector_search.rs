@@ -72,12 +72,12 @@ impl FalkorDBClient {
         let url = format!("{}://{}{}:{}/{}", scheme, auth, config.falkordb_host, config.falkordb_port, config.falkordb_database);
         let client = redis::Client::open(url)?;
         
-        // Add timeout for connection to handle Render free tier spin-up delays
+        // Bound the connection attempt so a slow FalkorDB cannot hang startup
         let connection = tokio::time::timeout(
-            std::time::Duration::from_secs(30), // 30 second timeout for free tier spin-up
+            std::time::Duration::from_secs(30),
             redis::aio::ConnectionManager::new(client.clone())
         ).await
-        .map_err(|_| anyhow::anyhow!("FalkorDB connection timed out after 30s (free tier spin-up?)"))??;
+        .map_err(|_| anyhow::anyhow!("FalkorDB connection timed out after 30s"))??;
         
         Ok(Self {
             _client: Some(client),
