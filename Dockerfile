@@ -59,14 +59,14 @@ COPY --from=rust-builder --chown=appuser:appgroup /app/target/release/data-vent 
 # Ensure correct permissions
 RUN chown -R appuser:appgroup /app
 
-ENV PORT=3002
+# PORT is supplied at runtime via .map.env / .secret.env (see .cline/rules/env-policy.md)
 
 # Switch to non-root user
 USER appuser
 
 # Health check optimized for Render
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-3002}/health || exit 1
+    CMD curl -f http://localhost:${PORT}/health || exit 1
 
 EXPOSE 3002
 

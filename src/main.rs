@@ -53,58 +53,14 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting data-vent (Rust)");
 
-    let config = Config::init_from_env().unwrap_or_else(|e| {
-        tracing::warn!("Config error, using defaults: {}", e);
-        Config {
-            app_port: 3002,
-            host: "0.0.0.0".to_string(),
-            falkordb_host: "localhost".to_string(),
-            falkordb_port: 6379,
-            falkordb_username: "default".to_string(),
-            falkordb_password: None,
-            falkordb_database: 0,
-            falkordb_graph_name: "confuse_graph".to_string(),
-            falkordb_vector_dimension: 768,
-            falkordb_similarity_threshold: 0.7,
-            falkordb_max_results: 10,
-            falkordb_use_tls: false,
-            nvidia_nim_api_key: None,
-            nvidia_nim_base_url: "https://integrate.api.nvidia.com".to_string(),
-            default_embedding_model: "nv-embed-v1".to_string(),
-            pipeline_max_query_chunks: 5,
-            pipeline_per_chunk_timeout: 5.0,
-            pipeline_vector_top_k: 10,
-            pipeline_dfs_depth: 2,
-            pipeline_dfs_min_relevance: 0.5,
-            pipeline_dfs_max_results: 20,
-            pipeline_max_total_results: 50,
-            pipeline_vector_weight: 0.7,
-            pipeline_graph_weight: 0.3,
-            pipeline_cross_chunk_weight: 0.1,
-            enable_bfs: true,
-            enable_pagerank: true,
-            enable_betweenness: false,
-            enable_wcc: false,
-            enable_sppaths: false,
-            pagerank_boost_weight: 0.15,
-            hnsw_m: 24,
-            hnsw_ef_construction: 250,
-            hnsw_ef_runtime: 25,
-            hnsw_similarity_function: "COSINE".to_string(),
-            hnsw_mode: "balanced".to_string(),
-            cache_embedding_capacity: 1000,
-            cache_embedding_ttl_secs: 3600,
-            cache_vector_capacity: 1000,
-            cache_vector_ttl_secs: 300,
-            cache_algorithm_capacity: 500,
-            cache_algorithm_ttl_secs: 1800,
-            cache_result_capacity: 500,
-            cache_result_ttl_secs: 120,
-            fusion_algorithm: "wrrf".to_string(),
-            wrrf_k: 60.0,
-            log_level: "INFO".to_string(),
-        }
-    });
+    // Fail fast when required env config is missing — values live in
+    // .map.env / .secret.env (no in-code defaults; see .cline/rules/env-policy.md)
+    let config = Config::init_from_env().map_err(|e| {
+        anyhow::anyhow!(
+            "Missing or invalid required environment configuration (see .map.env / .secret.env): {}",
+            e
+        )
+    })?;
 
     // Initialize FalkorDB (optional - allow service to start without it)
     let falkordb_client = match FalkorDBClient::new(&config).await {
