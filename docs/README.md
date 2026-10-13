@@ -48,7 +48,7 @@ cargo run
 |----------|-------------|---------|
 | `DATA_VENT_PORT` | HTTP port | `3002` |
 | `FALKORDB_HOST` / `FALKORDB_PORT` | FalkorDB (Redis protocol) | `localhost:6379` |
-| `FALKORDB_VECTOR_DIMENSION` | Vector dimension | `2048` |
+| `FALKORDB_EMBEDDING_DIM` | Vector dimension | `2048` |
 | `FUSION_ALGORITHM` | Fusion strategy | `wrrf` |
 
 ## Testing

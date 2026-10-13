@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
         Ok(client) => {
             info!("FalkorDB connected successfully");
             let _ = client
-                .initialize_indexes(&config.falkordb_graph_name, config.falkordb_vector_dimension)
+                .initialize_indexes(&config.falkordb_graph_name, config.falkordb_embedding_dim)
                 .await;
             client
         }

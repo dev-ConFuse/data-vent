@@ -70,10 +70,10 @@ pub struct MultiLevelCache {
 
 impl MultiLevelCache {
     pub fn new(config: &Config) -> Self {
-        let emb_cap = NonZeroUsize::new(config.cache_embedding_capacity).unwrap_or(NonZeroUsize::new(1000).unwrap());
-        let vec_cap = NonZeroUsize::new(config.cache_vector_capacity).unwrap_or(NonZeroUsize::new(1000).unwrap());
-        let algo_cap = NonZeroUsize::new(config.cache_algorithm_capacity).unwrap_or(NonZeroUsize::new(500).unwrap());
-        let res_cap = NonZeroUsize::new(config.cache_result_capacity).unwrap_or(NonZeroUsize::new(500).unwrap());
+        let emb_cap = NonZeroUsize::new(config.cache_embedding_capacity).unwrap_or(NonZeroUsize::new(1000).expect("literal capacity is non-zero"));
+        let vec_cap = NonZeroUsize::new(config.cache_vector_capacity).unwrap_or(NonZeroUsize::new(1000).expect("literal capacity is non-zero"));
+        let algo_cap = NonZeroUsize::new(config.cache_algorithm_capacity).unwrap_or(NonZeroUsize::new(500).expect("literal capacity is non-zero"));
+        let res_cap = NonZeroUsize::new(config.cache_result_capacity).unwrap_or(NonZeroUsize::new(500).expect("literal capacity is non-zero"));
 
         Self {
             embedding_cache: Arc::new(Mutex::new(LruCache::new(emb_cap))),

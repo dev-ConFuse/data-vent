@@ -8,7 +8,7 @@ This guide details the prerequisites, container build steps, Kubernetes cloud ma
    - FalkorDB cloud instance or self-hosted Redis with FalkorDB module.
    - Credentials configured in Kubernetes secrets (`falkordb-secret`).
 2. **NVIDIA NIM API Access**:
-   - Access token with permission to call embeddings models (e.g. `nv-embed-v1` or `nemotron-3-embed-1b`).
+   - Access token with permission to call `nvidia/nemotron-3-embed-1b`.
    - Configured in Kubernetes secrets (`nvidia-secret`).
 3. **Kubernetes Cluster**:
    - AWS EKS, GCP GKE, or Azure AKS with HorizontalPodAutoscaler support.

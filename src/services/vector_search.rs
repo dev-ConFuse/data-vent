@@ -130,7 +130,7 @@ impl FalkorDBClient {
             }));
         }
 
-        let conn = self.connection.as_ref().unwrap();
+        let conn = self.connection.as_ref().expect("infallible invariant reviewed 2026-10-13");
         let mut conn_clone = conn.clone();
         let result: redis::Value = redis::cmd("GRAPH.QUERY")
             .arg(graph_name)

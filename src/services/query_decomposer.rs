@@ -150,8 +150,8 @@ impl QueryDecomposer {
     }
 
     fn preprocess(&self, query: &str) -> String {
-        let re_ws = Regex::new(r"\s+").unwrap();
-        let re_chars = Regex::new(r"[^\w\s\u{0022}'\-_./]").unwrap();
+        let re_ws = Regex::new(r"\s+").expect("static regex compiles");
+        let re_chars = Regex::new(r"[^\w\s\u{0022}'\-_./]").expect("static regex compiles");
         let s1 = re_ws.replace_all(query.trim(), " ").to_string();
         let s2 = re_chars.replace_all(&s1, " ").to_string();
         re_ws.replace_all(&s2, " ").trim().to_string()
@@ -161,7 +161,7 @@ impl QueryDecomposer {
         let mut chunks = vec![];
         let mut remaining = cleaned.to_string();
 
-        let re_quoted = Regex::new(r#""([^"]+)""#).unwrap();
+        let re_quoted = Regex::new(r#""([^"]+)""#).expect("static regex compiles");
         let mut to_remove = vec![];
         for cap in re_quoted.captures_iter(&remaining) {
             let text = cap[1].trim();
@@ -181,7 +181,7 @@ impl QueryDecomposer {
             remaining = remaining.replace(&rem, " ");
         }
 
-        let re_ident = Regex::new(r"\b([a-zA-Z][a-zA-Z0-9]*(?:[._][a-zA-Z][a-zA-Z0-9]*)+)\b").unwrap();
+        let re_ident = Regex::new(r"\b([a-zA-Z][a-zA-Z0-9]*(?:[._][a-zA-Z][a-zA-Z0-9]*)+)\b").expect("static regex compiles");
         let mut to_remove2 = vec![];
         for cap in re_ident.captures_iter(&remaining) {
             let text = &cap[1];
@@ -201,7 +201,7 @@ impl QueryDecomposer {
             remaining = remaining.replace(&rem, " ");
         }
 
-        let re_const = Regex::new(r"\b([A-Z][A-Z0-9_]{2,})\b").unwrap();
+        let re_const = Regex::new(r"\b([A-Z][A-Z0-9_]{2,})\b").expect("static regex compiles");
         let mut to_remove3 = vec![];
         for cap in re_const.captures_iter(&remaining) {
             let text = &cap[1];
@@ -219,7 +219,7 @@ impl QueryDecomposer {
             remaining = remaining.replace(&rem, " ");
         }
 
-        let re_ws = Regex::new(r"\s+").unwrap();
+        let re_ws = Regex::new(r"\s+").expect("static regex compiles");
         remaining = re_ws.replace_all(&remaining, " ").trim().to_string();
 
         (chunks, remaining)
@@ -228,7 +228,7 @@ impl QueryDecomposer {
     fn extract_ngrams(&self, text: &str) -> Vec<(String, (usize, usize), Vec<String>)> {
         let words: Vec<&str> = text.split_whitespace().collect();
         let mut meaningful = vec![];
-        let re_strip = Regex::new(r"^[^\w]+|[^\w]+$").unwrap();
+        let re_strip = Regex::new(r"^[^\w]+|[^\w]+$").expect("static regex compiles");
 
         for (i, word) in words.iter().enumerate() {
             let clean = re_strip.replace_all(word, "").to_string().to_lowercase();

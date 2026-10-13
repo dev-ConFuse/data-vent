@@ -31,8 +31,8 @@ pub struct Config {
     #[envconfig(from = "FALKORDB_GRAPH_NAME")]
     pub falkordb_graph_name: String,
     
-    #[envconfig(from = "FALKORDB_VECTOR_DIMENSION")]
-    pub falkordb_vector_dimension: u16,
+    #[envconfig(from = "FALKORDB_EMBEDDING_DIM")]
+    pub falkordb_embedding_dim: u16,
     
     #[envconfig(from = "FALKORDB_SIMILARITY_THRESHOLD")]
     pub falkordb_similarity_threshold: f64,
