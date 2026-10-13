@@ -31,10 +31,12 @@ RUN mkdir -p src && \
 # ---------------------------------------------------------------------------
 RUN rm -rf src/*
 COPY src/ ./src/
+# Bench targets declared in Cargo.toml must exist for the manifest to load
+COPY benches/ ./benches/
 
 # Force Cargo to rebuild the actual binary
 RUN cargo clean -p data-vent 2>/dev/null; true
-RUN cargo build --release
+RUN find src -type f -exec touch {} + && cargo build --release
 
 # ==============================================================================
 # Stage 2: Runtime image
