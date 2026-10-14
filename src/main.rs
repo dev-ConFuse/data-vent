@@ -49,10 +49,9 @@ async fn main() -> anyhow::Result<()> {
     dotenvy::from_filename_override(".env.local").ok();
     tracing::info!("Environment variables loaded");
 
-    tracing_subscriber::fmt::init();
+    infra::logging::init_tracing();
 
-    info!("Starting data-vent (Rust)");
-
+    info!(service = "data-vent", "Starting service");
     // Fail fast when required env config is missing — values live in
     // .map.env / .secret.env (no in-code defaults; see .cline/rules/env-policy.md)
     let config = Config::init_from_env().map_err(|e| {
@@ -134,6 +133,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/retrieve/multi-hop", post(multi_hop_handler))
         .route("/api/v1/cache/invalidate", post(cache_invalidate_handler))
         .route("/api/v1/hnsw/update", post(update_hnsw_handler))
+        .layer(axum::middleware::from_fn(
+            infra::logging::access_log_middleware,
+        ))
         .with_state(state);
 
     // Use PORT from environment (Render) or fall back to config
