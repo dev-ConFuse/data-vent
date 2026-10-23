@@ -16,15 +16,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Tolerate flaky links when talking to crates.io: retry hard, never abort a
+# transfer just because it is momentarily slow, and use the git CLI fallback.
+ENV CARGO_NET_RETRY=10 \
+    CARGO_HTTP_TIMEOUT=120 \
+    CARGO_HTTP_LOW_SPEED_LIMIT=1 \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true
+
 # ---------------------------------------------------------------------------
 # Dependency caching layer
 # ---------------------------------------------------------------------------
 COPY Cargo.toml Cargo.lock* ./
 
-# Create dummy src for dependency caching
-RUN mkdir -p src && \
+# Dummy crate for dependency caching. Cargo.toml declares BOTH a lib
+# (src/lib.rs) and a bin (src/main.rs), plus an explicit [[bench]] target, so
+# all three must exist or `cargo build` aborts before fetching a single crate.
+# Do not mask failures here: a failed warm-up used to be cached as an empty
+# registry (via `|| true`), which forced every later build to re-download all
+# dependencies over a flaky link.
+RUN mkdir -p src benches && \
     echo 'fn main() {}' > src/main.rs && \
-    cargo build --release 2>/dev/null || true
+    echo '' > src/lib.rs && \
+    echo '' > benches/hnsw_benchmark.rs
+
+RUN cargo fetch
+RUN cargo build --release
 
 # ---------------------------------------------------------------------------
 # Real build
