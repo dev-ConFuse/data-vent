@@ -21,7 +21,7 @@ use services::graph_algorithms::PathResult;
 use services::intelligent_retriever::IntelligentRetriever;
 use services::parallel_search::ParallelSearchDispatcher;
 use services::query_decomposer::{QueryChunk, QueryDecomposer};
-use services::result_aggregator::ResultAggregator;
+use services::result_aggregator::{ResearchGuidance, ResultAggregator};
 use services::vector_search::FalkorDBClient;
 
 #[derive(Clone)]
@@ -197,6 +197,41 @@ async fn metrics_handler(
     }))
 }
 
+/// Serialize retrieval-side research guidance for the calling agent.
+///
+/// Every retrieve response carries this block so agents can see how much of the
+/// question is covered by evidence and what to do next instead of treating a
+/// single retrieval pass as a finished answer.
+fn guidance_json(g: &ResearchGuidance) -> serde_json::Value {
+    serde_json::json!({
+        "completeness": g.completeness,
+        "status": g.status,
+        "covered_sub_queries": g.covered_sub_queries,
+        "total_sub_queries": g.total_sub_queries,
+        "uncovered_sub_queries": g.uncovered_sub_queries,
+        "sub_query_coverage": g
+            .sub_query_coverage
+            .iter()
+            .map(|c| serde_json::json!({
+                "sub_query": c.sub_query,
+                "intent": c.intent,
+                "hits": c.hits,
+                "errored": c.errored,
+            }))
+            .collect::<Vec<_>>(),
+        "next_actions": g
+            .next_actions
+            .iter()
+            .map(|a| serde_json::json!({
+                "tool": a.tool,
+                "intent": a.intent,
+                "keywords": a.keywords,
+                "why": a.why,
+            }))
+            .collect::<Vec<_>>(),
+    })
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct AlgorithmOptions {
     #[serde(default = "default_true")]
@@ -360,6 +395,7 @@ async fn retrieve_handler(
         "graph_matches": agg_res.graph_matches,
         "completion_reached": agg_res.completion_reached,
         "total_time_ms": elapsed,
+        "guidance": guidance_json(&agg_res.guidance),
     }))
 }
 
@@ -466,6 +502,7 @@ async fn retrieve_stream_handler(
                 "graph_matches": agg_res.graph_matches,
                 "completion_reached": agg_res.completion_reached,
                 "total_time_ms": elapsed,
+                "guidance": guidance_json(&agg_res.guidance),
             })
             .to_string(),
         )));
@@ -516,6 +553,7 @@ async fn context_retrieve_handler(
         "graph_matches": agg_res.graph_matches,
         "completion_reached": agg_res.completion_reached,
         "total_time_ms": agg_res.aggregation_time_ms,
+        "guidance": guidance_json(&agg_res.guidance),
     }))
 }
 

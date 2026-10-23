@@ -13,9 +13,68 @@ pub struct AggregatedResult {
     pub unique_sources: usize,
     pub vector_matches: usize,
     pub graph_matches: usize,
+    /// Fusion-engine saturation flag: enough high-scoring chunks were fused, or
+    /// the result budget was filled. Distinct from `guidance.completeness`, which
+    /// measures how much of the *question* is backed by evidence.
     pub completion_reached: bool,
     #[allow(dead_code)]
     pub aggregation_time_ms: f64,
+    /// Research guidance for the calling agent (see the Research Protocol).
+    pub guidance: ResearchGuidance,
+}
+
+/// Coverage of one sub-query produced by query decomposition.
+#[derive(Debug, Clone)]
+pub struct SubQueryCoverage {
+    pub sub_query: String,
+    pub intent: String,
+    pub hits: usize,
+    pub errored: bool,
+}
+
+/// A concrete, ready-to-execute follow-up that closes an evidence gap.
+///
+/// `intent` + `keywords` map 1:1 onto the client-connector `search_knowledge`
+/// tool arguments so an agent can execute the action without inventing params.
+#[derive(Debug, Clone)]
+pub struct NextAction {
+    pub tool: String,
+    pub intent: String,
+    pub keywords: Vec<String>,
+    pub why: String,
+}
+
+/// Retrieval-side research guidance.
+///
+/// Retrieval is deliberately not a one-shot answer service: every response
+/// reports how much of the question is actually backed by evidence and what the
+/// caller should do next, so agents keep reasoning instead of answering from a
+/// single pass.
+#[derive(Debug, Clone)]
+pub struct ResearchGuidance {
+    /// 0.0..=1.0 — sub-query coverage blended with source corroboration.
+    pub completeness: f64,
+    /// "ready_to_answer" | "partial" | "needs_more_evidence" | "not_covered"
+    pub status: String,
+    pub covered_sub_queries: usize,
+    pub total_sub_queries: usize,
+    pub uncovered_sub_queries: Vec<String>,
+    pub sub_query_coverage: Vec<SubQueryCoverage>,
+    pub next_actions: Vec<NextAction>,
+}
+
+impl ResearchGuidance {
+    pub fn empty() -> Self {
+        Self {
+            completeness: 0.0,
+            status: "not_covered".to_string(),
+            covered_sub_queries: 0,
+            total_sub_queries: 0,
+            uncovered_sub_queries: vec![],
+            sub_query_coverage: vec![],
+            next_actions: vec![],
+        }
+    }
 }
 
 pub struct ResultAggregator {
@@ -88,6 +147,7 @@ impl ResultAggregator {
                 graph_matches: 0,
                 completion_reached: false,
                 aggregation_time_ms: start.elapsed().as_secs_f64() * 1000.0,
+                guidance: ResearchGuidance::empty(),
             };
         }
 
@@ -210,6 +270,7 @@ impl ResultAggregator {
         let unique_sources = unique_sources_set.len();
         let elapsed = start.elapsed().as_secs_f64() * 1000.0;
         let total_results = scored.len();
+        let guidance = self.build_guidance(&parallel_result, &scored, unique_sources);
 
         info!(
             "results_aggregated total={} unique_sources={} completion={} algo={} time_ms={:.2}",
@@ -224,6 +285,7 @@ impl ResultAggregator {
             graph_matches: parallel_result.total_graph_hits,
             completion_reached: completion,
             aggregation_time_ms: elapsed,
+            guidance,
         }
     }
 
@@ -237,6 +299,131 @@ impl ResultAggregator {
         let sum: f64 = chunks.iter().map(|c| c.final_score).sum();
         let avg = sum / chunks.len().max(1) as f64;
         avg >= self.min_avg_score
+    }
+
+    /// Compute research guidance: how much of the question is backed by
+    /// evidence, and what the caller should do next.
+    ///
+    /// `completeness` blends two honest signals:
+    ///   * sub-query coverage — did every part of the decomposed question match?
+    ///   * evidence depth    — is it corroborated by 2+ independent sources?
+    ///
+    /// `status` is "ready_to_answer" only when there are no remaining gaps, so
+    /// an agent cannot mistake a partially-covered question for a finished one.
+    fn build_guidance(
+        &self,
+        parallel_result: &ParallelSearchResult,
+        scored: &[ScoredChunk],
+        unique_sources: usize,
+    ) -> ResearchGuidance {
+        let coverage: Vec<SubQueryCoverage> = parallel_result
+            .chunk_results
+            .iter()
+            .map(|cr| SubQueryCoverage {
+                sub_query: cr.query_chunk.text.clone(),
+                intent: cr.query_chunk.intent.clone(),
+                hits: cr.vector_results.len() + cr.graph_results.len(),
+                errored: cr.error.is_some(),
+            })
+            .collect();
+
+        let total = coverage.len();
+        if total == 0 {
+            return ResearchGuidance::empty();
+        }
+
+        // Keywords are injected as "entity_lookup" chunks by the HTTP layer, so
+        // they can be echoed back verbatim as follow-up search arguments.
+        let entity_keywords: Vec<String> = parallel_result
+            .chunk_results
+            .iter()
+            .filter(|cr| cr.query_chunk.intent == "entity_lookup")
+            .map(|cr| cr.query_chunk.text.clone())
+            .collect();
+
+        let covered = coverage
+            .iter()
+            .filter(|c| !c.errored && c.hits > 0)
+            .count();
+        let uncovered: Vec<String> = coverage
+            .iter()
+            .filter(|c| !c.errored && c.hits == 0)
+            .map(|c| c.sub_query.clone())
+            .collect();
+
+        let coverage_ratio = covered as f64 / total as f64;
+        // Two independent sources is the bar for corroborated evidence.
+        let evidence_depth = (unique_sources as f64 / 2.0).min(1.0);
+        let completeness = if scored.is_empty() {
+            0.0
+        } else {
+            0.7 * coverage_ratio + 0.3 * evidence_depth
+        };
+
+        let mut next_actions: Vec<NextAction> = Vec::new();
+
+        // Gap 1: a sub-question produced no evidence at all.
+        for sub in uncovered.iter().take(3) {
+            let keywords = if entity_keywords.is_empty() {
+                vec![sub.clone()]
+            } else {
+                entity_keywords.clone()
+            };
+            next_actions.push(NextAction {
+                tool: "search_knowledge".to_string(),
+                intent: sub.clone(),
+                keywords,
+                why: "sub-query produced no evidence — retry with tighter terms \
+                      (file, function, class or error-message names) before answering"
+                    .to_string(),
+            });
+        }
+
+        // Gap 2: everything matched, but from a single source — uncorroborated.
+        if next_actions.is_empty() && !scored.is_empty() && unique_sources < 2 {
+            let keywords = if entity_keywords.is_empty() {
+                coverage.iter().map(|c| c.sub_query.clone()).take(3).collect()
+            } else {
+                entity_keywords.clone()
+            };
+            next_actions.push(NextAction {
+                tool: "search_knowledge".to_string(),
+                intent: "cross-check this question from an independent angle".to_string(),
+                keywords,
+                why: "only one source supports the evidence — corroborate before \
+                      treating the claim as settled"
+                    .to_string(),
+            });
+        }
+
+        let status = if scored.is_empty() {
+            "not_covered"
+        } else if next_actions.is_empty() && completeness >= 0.8 {
+            "ready_to_answer"
+        } else if completeness >= 0.5 {
+            "partial"
+        } else {
+            "needs_more_evidence"
+        };
+
+        info!(
+            "research_guidance status={} completeness={:.2} covered={}/{} actions={}",
+            status,
+            completeness,
+            covered,
+            total,
+            next_actions.len()
+        );
+
+        ResearchGuidance {
+            completeness: (completeness * 100.0).round() / 100.0,
+            status: status.to_string(),
+            covered_sub_queries: covered,
+            total_sub_queries: total,
+            uncovered_sub_queries: uncovered,
+            sub_query_coverage: coverage,
+            next_actions,
+        }
     }
 }
 
