@@ -344,7 +344,7 @@ async fn retrieve_handler(
         {
             Some(graph) => graph.to_string(),
             None => {
-                warn!("retrieve rejected: no x-user-id header and no explicit graph name");
+                tracing::warn!("retrieve rejected: no x-user-id header and no explicit graph name");
                 return Json(serde_json::json!({
                     "error": "graph scope required",
                     "detail": "provide an x-user-id header (preferred) or an explicit falkordb_graph_name",
@@ -481,7 +481,7 @@ async fn retrieve_stream_handler(
             {
                 Some(graph) => graph.to_string(),
                 None => {
-                    warn!("stream rejected: no x-user-id header and no explicit graph name");
+                    tracing::warn!("stream rejected: no x-user-id header and no explicit graph name");
                     let _ = tx.try_send(Ok(Event::default().event("error").data(
                         serde_json::json!({
                             "error": "graph scope required",
@@ -583,7 +583,7 @@ async fn context_retrieve_handler(
         {
             Some(graph) => graph.to_string(),
             None => {
-                warn!("retrieve rejected: no x-user-id header and no explicit graph name");
+                tracing::warn!("retrieve rejected: no x-user-id header and no explicit graph name");
                 return Json(serde_json::json!({
                     "error": "graph scope required",
                     "detail": "provide an x-user-id header (preferred) or an explicit falkordb_graph_name",
@@ -652,7 +652,7 @@ async fn multi_hop_handler(
         {
             Some(graph) => graph.to_string(),
             None => {
-                warn!("retrieve rejected: no x-user-id header and no explicit graph name");
+                tracing::warn!("retrieve rejected: no x-user-id header and no explicit graph name");
                 return Json(serde_json::json!({
                     "error": "graph scope required",
                     "detail": "provide an x-user-id header (preferred) or an explicit falkordb_graph_name",
@@ -694,7 +694,7 @@ async fn cache_invalidate_handler(
         .filter(|g| !g.is_empty())
         .map(str::to_string)
     else {
-        warn!("cache invalidate rejected: no explicit graph name");
+        tracing::warn!("cache invalidate rejected: no explicit graph name");
         return Json(serde_json::json!({
             "error": "graph scope required",
             "detail": "provide an explicit graph_name; there is no shared default graph",
@@ -725,7 +725,7 @@ async fn update_hnsw_handler(
         .filter(|g| !g.is_empty())
         .map(str::to_string)
     else {
-        warn!("hnsw update rejected: no explicit graph name");
+        tracing::warn!("hnsw update rejected: no explicit graph name");
         return Json(serde_json::json!({
             "error": "graph scope required",
             "detail": "provide an explicit falkordb_graph_name; there is no shared default graph",
