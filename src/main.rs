@@ -65,9 +65,12 @@ async fn main() -> anyhow::Result<()> {
     let falkordb_client = match FalkorDBClient::new(&config).await {
         Ok(client) => {
             info!("FalkorDB connected successfully");
-            let _ = client
-                .initialize_indexes(&config.falkordb_graph_name, config.falkordb_embedding_dim)
-                .await;
+            // NOTE: we deliberately do NOT pre-create an ambient default graph
+            // here. Historically this called initialize_indexes() with
+            // FALKORDB_GRAPH_NAME ("knowledge-layer"), which created a shared
+            // graph at startup that silently accumulated every tenant's data.
+            // Graphs are per-tenant (graph-<x-user-id>) and are created on
+            // first write; there is no shared default any more.
             client
         }
         Err(e) => {
@@ -322,10 +325,32 @@ async fn retrieve_handler(
         });
     }
 
-    let graph_name = if let Some(user_id) = headers.get("x-user-id").and_then(|h| h.to_str().ok()) {
-        format!("graph-{}", user_id)
-    } else {
-        req.falkordb_graph_name.unwrap_or_else(|| state.default_graph_name.clone())
+    // Graph scope is ALWAYS explicit. There is deliberately no ambient default:
+    // falling back to a shared graph (historically "knowledge-layer") silently
+    // mixed every tenant's data into one graph. The caller scopes via
+    // x-user-id, or names the graph explicitly in the request.
+    let graph_name = match headers
+        .get("x-user-id")
+        .and_then(|h| h.to_str().ok())
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+    {
+        Some(user_id) => format!("graph-{}", user_id),
+        None => match req
+            .falkordb_graph_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|g| !g.is_empty())
+        {
+            Some(graph) => graph.to_string(),
+            None => {
+                warn!("retrieve rejected: no x-user-id header and no explicit graph name");
+                return Json(serde_json::json!({
+                    "error": "graph scope required",
+                    "detail": "provide an x-user-id header (preferred) or an explicit falkordb_graph_name",
+                }));
+            }
+        },
     };
 
     if let Some(ref hnsw) = req.hnsw_config {
@@ -440,10 +465,33 @@ async fn retrieve_stream_handler(
             .to_string(),
         )));
 
-        let graph_name = if let Some(user_id) = headers.get("x-user-id").and_then(|h| h.to_str().ok()) {
-            format!("graph-{}", user_id)
-        } else {
-            req.falkordb_graph_name.unwrap_or_else(|| state.default_graph_name.clone())
+        // No ambient default graph: scope must come from x-user-id or the request.
+        let graph_name = match headers
+            .get("x-user-id")
+            .and_then(|h| h.to_str().ok())
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+        {
+            Some(user_id) => format!("graph-{}", user_id),
+            None => match req
+                .falkordb_graph_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|g| !g.is_empty())
+            {
+                Some(graph) => graph.to_string(),
+                None => {
+                    warn!("stream rejected: no x-user-id header and no explicit graph name");
+                    let _ = tx.try_send(Ok(Event::default().event("error").data(
+                        serde_json::json!({
+                            "error": "graph scope required",
+                            "detail": "provide an x-user-id header (preferred) or an explicit falkordb_graph_name",
+                        })
+                        .to_string(),
+                    )));
+                    return;
+                }
+            },
         };
 
         let search_res = state.dispatcher.dispatch(&graph_name, all_chunks, &state.retriever).await;
@@ -516,10 +564,32 @@ async fn context_retrieve_handler(
     headers: axum::http::HeaderMap,
     Json(req): Json<ContextRetrieveRequest>,
 ) -> Json<serde_json::Value> {
-    let graph_name = if let Some(user_id) = headers.get("x-user-id").and_then(|h| h.to_str().ok()) {
-        format!("graph-{}", user_id)
-    } else {
-        req.falkordb_graph_name.unwrap_or_else(|| state.default_graph_name.clone())
+    // Graph scope is ALWAYS explicit. There is deliberately no ambient default:
+    // falling back to a shared graph (historically "knowledge-layer") silently
+    // mixed every tenant's data into one graph. The caller scopes via
+    // x-user-id, or names the graph explicitly in the request.
+    let graph_name = match headers
+        .get("x-user-id")
+        .and_then(|h| h.to_str().ok())
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+    {
+        Some(user_id) => format!("graph-{}", user_id),
+        None => match req
+            .falkordb_graph_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|g| !g.is_empty())
+        {
+            Some(graph) => graph.to_string(),
+            None => {
+                warn!("retrieve rejected: no x-user-id header and no explicit graph name");
+                return Json(serde_json::json!({
+                    "error": "graph scope required",
+                    "detail": "provide an x-user-id header (preferred) or an explicit falkordb_graph_name",
+                }));
+            }
+        },
     };
 
     let agg_res = state
@@ -563,10 +633,32 @@ async fn multi_hop_handler(
     Json(req): Json<MultiHopRequest>,
 ) -> Json<serde_json::Value> {
     let start = std::time::Instant::now();
-    let graph_name = if let Some(user_id) = headers.get("x-user-id").and_then(|h| h.to_str().ok()) {
-        format!("graph-{}", user_id)
-    } else {
-        req.falkordb_graph_name.unwrap_or_else(|| state.default_graph_name.clone())
+    // Graph scope is ALWAYS explicit. There is deliberately no ambient default:
+    // falling back to a shared graph (historically "knowledge-layer") silently
+    // mixed every tenant's data into one graph. The caller scopes via
+    // x-user-id, or names the graph explicitly in the request.
+    let graph_name = match headers
+        .get("x-user-id")
+        .and_then(|h| h.to_str().ok())
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+    {
+        Some(user_id) => format!("graph-{}", user_id),
+        None => match req
+            .falkordb_graph_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|g| !g.is_empty())
+        {
+            Some(graph) => graph.to_string(),
+            None => {
+                warn!("retrieve rejected: no x-user-id header and no explicit graph name");
+                return Json(serde_json::json!({
+                    "error": "graph scope required",
+                    "detail": "provide an x-user-id header (preferred) or an explicit falkordb_graph_name",
+                }));
+            }
+        },
     };
 
     let paths: Vec<PathResult> = state
@@ -595,7 +687,19 @@ async fn cache_invalidate_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(req): Json<CacheInvalidateRequest>,
 ) -> Json<serde_json::Value> {
-    let graph = req.graph_name.unwrap_or_else(|| state.default_graph_name.clone());
+    let Some(graph) = req
+        .graph_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|g| !g.is_empty())
+        .map(str::to_string)
+    else {
+        warn!("cache invalidate rejected: no explicit graph name");
+        return Json(serde_json::json!({
+            "error": "graph scope required",
+            "detail": "provide an explicit graph_name; there is no shared default graph",
+        }));
+    };
     state.cache.invalidate_graph(&graph).await;
     Json(serde_json::json!({
         "status": "success",
@@ -614,7 +718,19 @@ async fn update_hnsw_handler(
     Json(req): Json<HnswUpdateRequest>,
 ) -> Json<serde_json::Value> {
     let config = services::vector_search::HNSWConfig::from_mode(&req.mode);
-    let graph_name = req.falkordb_graph_name.unwrap_or_else(|| state.default_graph_name.clone());
+    let Some(graph_name) = req
+        .falkordb_graph_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|g| !g.is_empty())
+        .map(str::to_string)
+    else {
+        warn!("hnsw update rejected: no explicit graph name");
+        return Json(serde_json::json!({
+            "error": "graph scope required",
+            "detail": "provide an explicit falkordb_graph_name; there is no shared default graph",
+        }));
+    };
 
     match state.retriever.update_hnsw_parameters(&graph_name, &config).await {
         Ok(_) => Json(serde_json::json!({
