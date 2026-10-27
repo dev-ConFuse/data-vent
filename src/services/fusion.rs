@@ -67,14 +67,46 @@ impl FusionEngine {
 
         let k = self.wrrf_k;
 
-        for list in ranked_lists {
+        // WRRF fuses by RANK only: `weight / (k + rank + 1)`. That gives a weak
+        // match at rank 0 exactly the same influence as a strong one, which is
+        // how topically unrelated prose (a semantically adjacent gardening note,
+        // say) could outrank a chunk that names the subject actually asked about.
+        //
+        // Two corrections, both scale-free:
+        //   1. drop candidates far weaker than their own list's best match -
+        //      they are semantic noise, not evidence;
+        //   2. scale each candidate's RRF contribution by its real relevance
+        //      relative to that best match, so rank and quality both matter.
+        const RELATIVE_SCORE_FLOOR: f64 = 0.55;
+        const QUALITY_FLOOR: f64 = 0.25;
+
+        let list_best: Vec<f64> = ranked_lists
+            .iter()
+            .map(|l| l.items.iter().map(|i| i.score).fold(f64::MIN, f64::max))
+            .collect();
+
+        for (list_idx, list) in ranked_lists.iter().enumerate() {
             let weight = list.weight;
+            let best = list_best[list_idx];
             let is_vector = list.name.starts_with("vector");
             let is_graph = list.name.starts_with("graph") || list.name.starts_with("bfs") || list.name.starts_with("dfs");
 
             for (rank, item) in list.items.iter().enumerate() {
+                // 1. relative floor
+                if best > 0.0 && item.score < best * RELATIVE_SCORE_FLOOR {
+                    continue;
+                }
+
+                // 2. quality-weighted reciprocal rank
+                let quality = if best > 0.0 {
+                    (item.score / best).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                let quality_factor = QUALITY_FLOOR + (1.0 - QUALITY_FLOOR) * quality;
+
                 let chunk_id = &item.chunk_id;
-                let rr_score = weight / (k + (rank as f64) + 1.0);
+                let rr_score = weight / (k + (rank as f64) + 1.0) * quality_factor;
                 *score_map.entry(chunk_id.clone()).or_insert(0.0) += rr_score;
 
                 if is_vector {
