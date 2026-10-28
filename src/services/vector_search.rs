@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing::info;
+use tokio::sync::RwLock;
+use tracing::{error, info, warn};
 
 use crate::infra::Config;
 
@@ -55,8 +58,8 @@ impl HNSWConfig {
 
 #[derive(Clone)]
 pub struct FalkorDBClient {
-    _client: Option<redis::Client>,
-    connection: Option<redis::aio::ConnectionManager>,
+    client: Option<redis::Client>,
+    connection: Arc<RwLock<Option<redis::aio::ConnectionManager>>>,
     is_dummy: bool,
 }
 
@@ -67,31 +70,88 @@ impl FalkorDBClient {
         } else {
             String::new()
         };
-        
+
         let scheme = if config.falkordb_use_tls { "rediss" } else { "redis" };
         let url = format!("{}://{}{}:{}/{}", scheme, auth, config.falkordb_host, config.falkordb_port, config.falkordb_database);
         let client = redis::Client::open(url)?;
-        
-        // Bound the connection attempt so a slow FalkorDB cannot hang startup
-        let connection = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            redis::aio::ConnectionManager::new(client.clone())
-        ).await
-        .map_err(|_| anyhow::anyhow!("FalkorDB connection timed out after 30s"))??;
-        
+
+        let connection: Arc<RwLock<Option<redis::aio::ConnectionManager>>> = Arc::new(RwLock::new(None));
+
+        // A slow FalkorDB must neither hang startup nor permanently degrade the
+        // service. Make one bounded attempt here, then keep retrying in the
+        // background so a slow boot self-heals without a manual restart.
+        Self::connect_once(&client, &connection).await;
+        if connection.read().await.is_none() {
+            warn!("FalkorDB unavailable at startup - retrying in background");
+            Self::spawn_reconnect(client.clone(), connection.clone());
+        }
+
         Ok(Self {
-            _client: Some(client),
-            connection: Some(connection),
+            client: Some(client),
+            connection,
             is_dummy: false,
         })
+    }
+
+    /// One bounded connection attempt. Returns true if a live manager is held.
+    async fn connect_once(
+        client: &redis::Client,
+        slot: &Arc<RwLock<Option<redis::aio::ConnectionManager>>>,
+    ) -> bool {
+        if slot.read().await.is_some() {
+            return true;
+        }
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            redis::aio::ConnectionManager::new(client.clone()),
+        )
+        .await
+        {
+            Ok(Ok(cm)) => {
+                *slot.write().await = Some(cm);
+                info!("FalkorDB connected");
+                true
+            }
+            Ok(Err(e)) => {
+                warn!("FalkorDB connect failed: {e}");
+                false
+            }
+            Err(_) => {
+                warn!("FalkorDB connect attempt timed out");
+                false
+            }
+        }
+    }
+
+    /// Background reconnect loop. Without this, a single slow boot left the
+    /// service running as a dummy client (every query returning empty) until
+    /// someone restarted the container.
+    fn spawn_reconnect(
+        client: redis::Client,
+        slot: Arc<RwLock<Option<redis::aio::ConnectionManager>>>,
+    ) {
+        tokio::spawn(async move {
+            for attempt in 1..=24 {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                if slot.read().await.is_some() {
+                    return;
+                }
+                if Self::connect_once(&client, &slot).await {
+                    info!("FalkorDB reconnected after {attempt} background attempt(s)");
+                    return;
+                }
+                warn!("FalkorDB still unavailable (background attempt {attempt}/24)");
+            }
+            error!("FalkorDB never became available; retrieval stays degraded");
+        });
     }
 
     pub fn new_dummy() -> Self {
         // Create a dummy client that will fail gracefully on queries
         // This allows the service to start even without FalkorDB
         Self {
-            _client: None,
-            connection: None,
+            client: None,
+            connection: Arc::new(RwLock::new(None)),
             is_dummy: true,
         }
     }
@@ -122,20 +182,34 @@ impl FalkorDBClient {
     }
 
     pub async fn query(&self, graph_name: &str, cypher: &str) -> anyhow::Result<Value> {
-        if self.is_dummy || self.connection.is_none() {
-            // Return empty result for dummy client
+        if self.is_dummy {
+            // Not configured at all - nothing will ever connect.
             return Ok(serde_json::json!({
                 "results": [],
-                "error": "FalkorDB not connected"
+                "error": "FalkorDB not configured"
             }));
         }
 
-        let conn = self.connection.as_ref().expect("infallible invariant reviewed 2026-10-13");
-        let mut conn_clone = conn.clone();
+        // Serve degraded while the background reconnect is still working.
+        let conn = match self.connection.read().await.clone() {
+            Some(c) => c,
+            None => {
+                return Ok(serde_json::json!({
+                    "results": [],
+                    "error": "FalkorDB not connected"
+                }));
+            }
+        };
+        let mut conn_clone = conn;
+        // NOTE: deliberately NOT using `--compact`. Compact replies encode every
+        // header and every cell as a `[type_code, value]` pair, which silently
+        // defeated column-name matching downstream (content came back empty and
+        // source_id fell back to "unknown"). The plain reply is a flat
+        // [columns, rows, stats] of bare strings, which is what
+        // IntelligentRetriever::parse_graph_results expects.
         let result: redis::Value = redis::cmd("GRAPH.QUERY")
             .arg(graph_name)
             .arg(cypher)
-            .arg("--compact")
             .query_async(&mut conn_clone)
             .await?;
             

@@ -81,32 +81,73 @@ impl IntelligentRetriever {
             "input_type": "query"
         });
 
-        match self.http_client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.nim_api_key))
-            .json(&body)
-            .send()
-            .await 
-        {
-            Ok(resp) => {
-                if let Ok(data) = resp.json::<serde_json::Value>().await {
-                    if let Some(data_arr) = data.get("data").and_then(|d| d.as_array()) {
-                        if !data_arr.is_empty() {
-                            if let Some(embedding) = data_arr[0].get("embedding").and_then(|e| e.as_array()) {
-                                let result: Vec<f64> = embedding.iter().filter_map(|v| v.as_f64()).collect();
-                                if !result.is_empty() {
-                                    self.cache.put_embedding(query.to_string(), result.clone()).await;
+        // Transient network failures (connection resets on a slow link) must not
+        // silently zero out the search: retry before giving up, and surface the
+        // HTTP status when the API rejects us - previously a non-200 was swallowed
+        // with no log at all.
+        let mut last_err = String::new();
+        for attempt in 1..=3 {
+            match self
+                .http_client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", self.nim_api_key))
+                .json(&body)
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if !status.is_success() {
+                        let txt = resp.text().await.unwrap_or_default();
+                        last_err = format!("HTTP {}: {}", status, txt.chars().take(160).collect::<String>());
+                        warn!("NIM embeddings call failed (attempt {}/3): {}", attempt, last_err);
+                    } else {
+                        match resp.json::<serde_json::Value>().await {
+                            Ok(data) => {
+                                if let Some(embedding) = data
+                                    .get("data")
+                                    .and_then(|d| d.as_array())
+                                    .and_then(|arr| arr.first())
+                                    .and_then(|first| first.get("embedding"))
+                                    .and_then(|e| e.as_array())
+                                {
+                                    let result: Vec<f64> =
+                                        embedding.iter().filter_map(|v| v.as_f64()).collect();
+                                    if !result.is_empty() {
+                                        self.cache
+                                            .put_embedding(query.to_string(), result.clone())
+                                            .await;
+                                        return result;
+                                    }
+                                    last_err = "empty embedding vector in response".to_string();
+                                } else {
+                                    last_err = "response missing data[0].embedding".to_string();
                                 }
-                                return result;
+                                warn!(
+                                    "NIM embeddings unusable (attempt {}/3): {}",
+                                    attempt, last_err
+                                );
+                            }
+                            Err(e) => {
+                                last_err = format!("bad JSON body: {e}");
+                                warn!(
+                                    "NIM embeddings parse failed (attempt {}/3): {}",
+                                    attempt, last_err
+                                );
                             }
                         }
                     }
                 }
+                Err(e) => {
+                    last_err = format!("{e}");
+                    warn!("NIM embeddings request failed (attempt {}/3): {}", attempt, last_err);
+                }
             }
-            Err(e) => {
-                error!("vectorize_query_failed: {}", e);
+            if attempt < 3 {
+                tokio::time::sleep(std::time::Duration::from_millis(400 * attempt as u64)).await;
             }
         }
+        error!("vectorize_query_failed after 3 attempts: {}", last_err);
         vec![]
     }
 
@@ -225,6 +266,15 @@ impl IntelligentRetriever {
                 let mut headers = vec![];
                 if let Some(h_arr) = headers_raw.as_array() {
                     for h in h_arr {
+                        // Compact replies (if ever re-enabled) encode headers as
+                        // `[type_code, name]` — so prefer the last string in the
+                        // pair, which is the name.
+                        if let Some(pair) = h.as_array() {
+                            if let Some(name) = pair.iter().rev().find_map(|v| v.as_str()) {
+                                headers.push(name.to_string());
+                                continue;
+                            }
+                        }
                         if let Some(s) = h.as_str() {
                             headers.push(s.to_string());
                         } else {
@@ -249,7 +299,13 @@ impl IntelligentRetriever {
                                     continue;
                                 }
                                 let col_name = &headers[i];
-                                let v_str = val.as_str().unwrap_or("").to_string();
+                                // Strings pass through; numbers/bools are rendered so
+                                // score/depth stay parseable below; nulls stay empty.
+                                let v_str = match val {
+                                    serde_json::Value::Null => String::new(),
+                                    serde_json::Value::String(s) => s.clone(),
+                                    other => other.to_string(),
+                                };
 
                                 match col_name.as_str() {
                                     "chunk_id" => chunk_id = v_str,
