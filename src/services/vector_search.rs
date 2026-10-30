@@ -61,6 +61,8 @@ pub struct FalkorDBClient {
     client: Option<redis::Client>,
     connection: Arc<RwLock<Option<redis::aio::ConnectionManager>>>,
     is_dummy: bool,
+    /// Embedding dimension (from config); needed to create vector indexes.
+    embedding_dim: u16,
 }
 
 impl FalkorDBClient {
@@ -90,6 +92,7 @@ impl FalkorDBClient {
             client: Some(client),
             connection,
             is_dummy: false,
+            embedding_dim: config.falkordb_embedding_dim,
         })
     }
 
@@ -153,13 +156,22 @@ impl FalkorDBClient {
             client: None,
             connection: Arc::new(RwLock::new(None)),
             is_dummy: true,
+            embedding_dim: 0,
         }
     }
 
     pub async fn initialize_indexes(&self, graph_name: &str, vector_dim: u16) -> anyhow::Result<()> {
         info!("Initializing FalkorDB indexes for graph: {} (dim: {})", graph_name, vector_dim);
-        // Equivalent to db.idx.vector.createNodeIndex
-        let cypher = format!("CALL db.idx.vector.createNodeIndex('Vector_Chunk', 'embeddings', {}, 'COSINE')", vector_dim);
+        // Verified against the live FalkorDB server: the RedisGraph-era
+        // `CALL db.idx.vector.createNodeIndex(...)` procedure is NOT registered
+        // (it fails with "Procedure ... is not registered"). The supported form
+        // is the Cypher DDL below, which is also what auth-middleware's
+        // createUserGraph and the uni-proc ingest path use. It is idempotent —
+        // re-running reports "Attribute 'embeddings' is already indexed".
+        let cypher = format!(
+            "CREATE VECTOR INDEX FOR (c:Vector_Chunk) ON (c.embeddings) OPTIONS {{dimension: {}, similarityFunction: 'cosine'}}",
+            vector_dim
+        );
         let _ = self.query(graph_name, &cypher).await;
         
         let fts_cypher = "CALL db.idx.fulltext.createNodeIndex('Vector_Chunk', 'content')";
@@ -172,13 +184,35 @@ impl FalkorDBClient {
         graph_name: &str,
         config: &HNSWConfig,
     ) -> anyhow::Result<()> {
+        // `CALL db.idx.vector.configureNodeIndex(...)` is NOT registered on this
+        // server (verified live), and vector indexes cannot be dropped or altered
+        // once created. These parameters can only take effect at index-creation
+        // time, so try to create the index with them and report honestly when the
+        // index already exists.
         let cypher = format!(
-            "CALL db.idx.vector.configureNodeIndex('Vector_Chunk', 'embeddings', \
-             {{M: {}, efConstruction: {}, efRuntime: {}, similarityFunction: '{}'}})",
-            config.m, config.ef_construction, config.ef_runtime, config.similarity_function
+            "CREATE VECTOR INDEX FOR (c:Vector_Chunk) ON (c.embeddings) OPTIONS {{dimension: {}, similarityFunction: '{}', M: {}, efConstruction: {}, efRuntime: {}}}",
+            self.embedding_dim,
+            config.similarity_function.to_lowercase(),
+            config.m,
+            config.ef_construction,
+            config.ef_runtime
         );
-        self.query(graph_name, &cypher).await?;
-        Ok(())
+        match self.query(graph_name, &cypher).await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("already indexed") || msg.contains("already exists") {
+                    warn!(
+                        "HNSW parameter update for '{}' ignored: FalkorDB does not support \
+                         altering vector-index parameters after creation",
+                        graph_name
+                    );
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            }
+        }
     }
 
     pub async fn query(&self, graph_name: &str, cypher: &str) -> anyhow::Result<Value> {

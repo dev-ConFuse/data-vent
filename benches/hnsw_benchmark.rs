@@ -25,8 +25,8 @@ fn vector_search_cypher_generation_benchmark(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(mode), &config, |b, cfg| {
             b.iter(|| {
                 let cypher = format!(
-                    "CALL db.idx.vector.configureNodeIndex('Vector_Chunk', 'embeddings', \
-                     {{M: {}, efConstruction: {}, efRuntime: {}, similarityFunction: '{}'}})",
+                    "CREATE VECTOR INDEX FOR (c:Vector_Chunk) ON (c.embeddings) \
+                     OPTIONS {{dimension: 2048, similarityFunction: '{}', M: {}, efConstruction: {}, efRuntime: {}}}",
                     cfg.m, cfg.ef_construction, cfg.ef_runtime, cfg.similarity_function
                 );
                 black_box(cypher)
