@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tracing::{error, info, warn};
 
 use crate::services::intelligent_retriever::SearchResult;
-use crate::services::vector_search::FalkorDBClient;
+use crate::services::vector_search::FalkorDbClient;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathResult {
@@ -25,11 +25,11 @@ pub struct CentralityScores {
 
 #[derive(Clone)]
 pub struct GraphAlgorithms {
-    falkordb_client: FalkorDBClient,
+    falkordb_client: FalkorDbClient,
 }
 
 impl GraphAlgorithms {
-    pub fn new(falkordb_client: FalkorDBClient) -> Self {
+    pub fn new(falkordb_client: FalkorDbClient) -> Self {
         Self { falkordb_client }
     }
 

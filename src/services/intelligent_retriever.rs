@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 use crate::infra::Config;
 use crate::services::cache::{MultiLevelCache, VectorCacheKey};
 use crate::services::graph_algorithms::{GraphAlgorithms, PathResult};
-use crate::services::vector_search::FalkorDBClient;
+use crate::services::vector_search::FalkorDbClient;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -24,7 +24,7 @@ pub struct SearchResult {
 }
 
 pub struct IntelligentRetriever {
-    pub falkordb_client: FalkorDBClient,
+    pub falkordb_client: FalkorDbClient,
     pub graph_algo: GraphAlgorithms,
     pub cache: Arc<MultiLevelCache>,
     http_client: reqwest::Client,
@@ -34,7 +34,7 @@ pub struct IntelligentRetriever {
 }
 
 impl IntelligentRetriever {
-    pub fn new(falkordb_client: FalkorDBClient, cache: Arc<MultiLevelCache>, config: &Config) -> Self {
+    pub fn new(falkordb_client: FalkorDbClient, cache: Arc<MultiLevelCache>, config: &Config) -> Self {
         let graph_algo = GraphAlgorithms::new(falkordb_client.clone());
         Self {
             falkordb_client,

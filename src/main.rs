@@ -22,7 +22,7 @@ use services::intelligent_retriever::IntelligentRetriever;
 use services::parallel_search::ParallelSearchDispatcher;
 use services::query_decomposer::{QueryChunk, QueryDecomposer};
 use services::result_aggregator::{ResearchGuidance, ResultAggregator};
-use services::vector_search::FalkorDBClient;
+use services::vector_search::FalkorDbClient;
 
 #[derive(Clone)]
 struct AppState {
@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
     })?;
 
     // Initialize FalkorDB (optional - allow service to start without it)
-    let falkordb_client = match FalkorDBClient::new(&config).await {
+    let falkordb_client = match FalkorDbClient::new(&config).await {
         Ok(client) => {
             info!("FalkorDB connected successfully");
             // NOTE: we deliberately do NOT pre-create an ambient default graph
@@ -78,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
                 "Failed to connect to FalkorDB: {}. Service will start in degraded mode.",
                 e
             );
-            FalkorDBClient::new_dummy()
+            FalkorDbClient::new_dummy()
         }
     };
 

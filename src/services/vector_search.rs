@@ -57,7 +57,7 @@ impl HNSWConfig {
 }
 
 #[derive(Clone)]
-pub struct FalkorDBClient {
+pub struct FalkorDbClient {
     client: Option<redis::Client>,
     connection: Arc<RwLock<Option<redis::aio::ConnectionManager>>>,
     is_dummy: bool,
@@ -65,7 +65,7 @@ pub struct FalkorDBClient {
     embedding_dim: u16,
 }
 
-impl FalkorDBClient {
+impl FalkorDbClient {
     pub async fn new(config: &Config) -> anyhow::Result<Self> {
         let auth = if let Some(ref pwd) = config.falkordb_password {
             format!("{}:{}@", config.falkordb_username, pwd)
